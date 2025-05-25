@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
@@ -12,6 +13,14 @@ from langchain.docstore.document import Document
 from htmlTemplates import css, bot_template, user_template
 import base64
 import io
+
+# Load environment variables (locally) or Streamlit Secrets (in cloud)
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+
+if not OPENAI_API_KEY:
+    st.error("🚨 OpenAI API key not found. Please set it in .env or Streamlit secrets.")
+    st.stop()
 
 
 def get_pdf_text_and_chunks(pdf_docs):
@@ -36,12 +45,12 @@ def split_documents(documents):
 
 
 def get_vectorstore(text_chunks):
-    embeddings = OpenAIEmbeddings()
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
     return FAISS.from_documents(text_chunks, embedding=embeddings)
 
 
 def get_conversation_chain(vectorstore):
-    llm = ChatOpenAI()
+    llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY)
     memory = ConversationBufferMemory(
         memory_key='chat_history',
         return_messages=True,
@@ -63,7 +72,6 @@ def handle_userinput(user_question):
     pages = sorted(set(doc.metadata.get("page", "?") for doc in source_docs))
     page_info = f"<div style='color: gray; font-size: small;'>Pages referenced: {', '.join(map(str, pages))}</div>"
 
-    # Save history
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     st.session_state.chat_history.append({
@@ -77,7 +85,7 @@ def handle_userinput(user_question):
 
 
 def summarize_documents(vectorstore):
-    llm = ChatOpenAI(temperature=0)
+    llm = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY)
     summarize_chain = load_summarize_chain(llm, chain_type="map_reduce")
     documents = list(vectorstore.docstore._dict.values())
     return summarize_chain.run(documents)
@@ -113,7 +121,6 @@ def download_chat_history():
 
 
 def main():
-    load_dotenv()
     st.set_page_config(page_title="Chat with PDFs", page_icon="📚", layout="wide")
     st.write(css, unsafe_allow_html=True)
 

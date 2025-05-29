@@ -14,16 +14,26 @@ import base64
 import os
 from dotenv import load_dotenv
 
-# Optional: html templates
+# -------------- HTML & CSS Templates -------------- #
 css = """
 <style>
 .justified { text-align: justify; }
 </style>
 """
-user_template = "<div style='background-color:#e0f7fa;padding:10px;border-radius:10px;margin:10px 0;'>User: {{MSG}}</div>"
-bot_template = "<div style='background-color:#fff3e0;padding:10px;border-radius:10px;margin:10px 0;'>Bot: {{MSG}}</div>"
+user_template = """
+<div style='background-color:#e0f7fa;padding:10px;
+            border-radius:10px;margin:10px 0;'>
+    User: {{MSG}}
+</div>
+"""
+bot_template = """
+<div style='background-color:#000000; color:#FFFFFF;
+            padding:10px;border-radius:10px;margin:10px 0;'>
+    Bot: {{MSG}}
+</div>
+"""
 
-# Load API Key
+# ------------------- API Key Setup ------------------ #
 load_dotenv()
 key = os.getenv("OPENAI_API_KEY")
 if not key:
@@ -31,7 +41,7 @@ if not key:
 else:
     print("✅ API key loaded.")
 
-# --------------------- File Parsing ------------------------- #
+# --------------- File Parsing ----------------------- #
 def extract_text_from_files(uploaded_files):
     documents = []
     for file in uploaded_files:
@@ -55,7 +65,7 @@ def extract_text_from_files(uploaded_files):
             documents.append(Document(page_content=text, metadata={"source": file.name}))
     return documents
 
-# ------------------ LangChain Components -------------------- #
+# ------------------- LangChain Components ------------------ #
 def split_documents(documents):
     text_splitter = CharacterTextSplitter(
         separator="\n", chunk_size=1000, chunk_overlap=200, length_function=len

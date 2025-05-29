@@ -1,7 +1,7 @@
 import streamlit as st
-import os
-from dotenv import load_dotenv
 from PyPDF2 import PdfReader
+from docx import Document as DocxDocument
+from pptx import Presentation
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
@@ -10,47 +10,64 @@ from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langchain.chains.summarize import load_summarize_chain
 from langchain.docstore.document import Document
-from htmlTemplates import css, bot_template, user_template
 import base64
-import io
+import os
+from dotenv import load_dotenv
 
-# Load environment variables (locally) or Streamlit Secrets (in cloud)
+# Optional: html templates
+css = """
+<style>
+.justified { text-align: justify; }
+</style>
+"""
+user_template = "<div style='background-color:#e0f7fa;padding:10px;border-radius:10px;margin:10px 0;'>User: {{MSG}}</div>"
+bot_template = "<div style='background-color:#fff3e0;padding:10px;border-radius:10px;margin:10px 0;'>Bot: {{MSG}}</div>"
+
+# Load API Key
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+key = os.getenv("OPENAI_API_KEY")
+if not key:
+    raise ValueError("❌ OPENAI_API_KEY is missing from the .env file!")
+else:
+    print("✅ API key loaded.")
 
-if not OPENAI_API_KEY:
-    st.error("🚨 OpenAI API key not found. Please set it in .env or Streamlit secrets.")
-    st.stop()
-
-
-def get_pdf_text_and_chunks(pdf_docs):
+# --------------------- File Parsing ------------------------- #
+def extract_text_from_files(uploaded_files):
     documents = []
-    for pdf in pdf_docs:
-        pdf_reader = PdfReader(pdf)
-        for i, page in enumerate(pdf_reader.pages):
-            text = page.extract_text()
-            if text:
-                documents.append(Document(page_content=text, metadata={"page": i + 1}))
+    for file in uploaded_files:
+        if file.name.endswith(".pdf"):
+            pdf_reader = PdfReader(file)
+            for i, page in enumerate(pdf_reader.pages):
+                text = page.extract_text()
+                if text:
+                    documents.append(Document(page_content=text, metadata={"source": file.name, "page": i + 1}))
+        elif file.name.endswith(".docx"):
+            docx = DocxDocument(file)
+            text = "\n".join([para.text for para in docx.paragraphs])
+            documents.append(Document(page_content=text, metadata={"source": file.name}))
+        elif file.name.endswith(".pptx"):
+            ppt = Presentation(file)
+            text = ""
+            for slide in ppt.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text.strip():
+                        text += shape.text.strip() + "\n"
+            documents.append(Document(page_content=text, metadata={"source": file.name}))
     return documents
 
-
+# ------------------ LangChain Components -------------------- #
 def split_documents(documents):
     text_splitter = CharacterTextSplitter(
-        separator="\n",
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len
+        separator="\n", chunk_size=1000, chunk_overlap=200, length_function=len
     )
     return text_splitter.split_documents(documents)
 
-
 def get_vectorstore(text_chunks):
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    embeddings = OpenAIEmbeddings(openai_api_key=key)
     return FAISS.from_documents(text_chunks, embedding=embeddings)
 
-
 def get_conversation_chain(vectorstore):
-    llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY)
+    llm = ChatOpenAI(openai_api_key=key)
     memory = ConversationBufferMemory(
         memory_key='chat_history',
         return_messages=True,
@@ -64,33 +81,34 @@ def get_conversation_chain(vectorstore):
         output_key='answer'
     )
 
-
 def handle_userinput(user_question):
     response = st.session_state.conversation({'question': user_question})
     answer = response['answer']
     source_docs = response.get('source_documents', [])
-    pages = sorted(set(doc.metadata.get("page", "?") for doc in source_docs))
-    page_info = f"<div style='color: gray; font-size: small;'>Pages referenced: {', '.join(map(str, pages))}</div>"
+    sources = set(doc.metadata.get("source", "?") for doc in source_docs)
+    page_info = f"<div style='color: gray; font-size: small;'>Sources: {', '.join(map(str, sources))}</div>"
 
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    st.session_state.chat_history.append({
-        "user": user_question,
-        "bot": answer,
-        "pages": pages
-    })
+    st.session_state.chat_history.append(("user", user_question))
+    st.session_state.chat_history.append(("bot", answer))
 
     st.write(user_template.replace("{{MSG}}", user_question), unsafe_allow_html=True)
     st.write(bot_template.replace("{{MSG}}", answer + page_info), unsafe_allow_html=True)
 
-
 def summarize_documents(vectorstore):
-    llm = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY)
+    llm = ChatOpenAI(openai_api_key=key, temperature=0)
     summarize_chain = load_summarize_chain(llm, chain_type="map_reduce")
     documents = list(vectorstore.docstore._dict.values())
     return summarize_chain.run(documents)
 
+def download_chat_history():
+    chat_lines = []
+    for role, message in st.session_state.chat_history:
+        prefix = "User: " if role == "user" else "Bot: "
+        chat_lines.append(f"{prefix}{message}")
+    history_text = "\n".join(chat_lines)
+    st.download_button("💾 Download Chat History", data=history_text, file_name="chat_history.txt")
 
+# ---------------------- File Preview ------------------------ #
 def display_pdf(file):
     file.seek(0)
     base64_pdf = base64.b64encode(file.read()).decode('utf-8')
@@ -99,29 +117,28 @@ def display_pdf(file):
                 width="100%" height="700px" type="application/pdf"></iframe>
     """, unsafe_allow_html=True)
 
+def display_docx(file):
+    file.seek(0)
+    doc = DocxDocument(file)
+    content = ""
+    for para in doc.paragraphs:
+        content += f"<p>{para.text}</p>"
+    st.markdown(content, unsafe_allow_html=True)
 
-def download_chat_history():
-    if "chat_history" not in st.session_state or not st.session_state.chat_history:
-        st.warning("No chat history to download.")
-        return
+def display_pptx(file):
+    file.seek(0)
+    prs = Presentation(file)
+    for idx, slide in enumerate(prs.slides):
+        slide_text = f"<h4>Slide {idx + 1}</h4><ul>"
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text.strip():
+                slide_text += f"<li>{shape.text.strip()}</li>"
+        slide_text += "</ul><hr>"
+        st.markdown(slide_text, unsafe_allow_html=True)
 
-    output = io.StringIO()
-    for i, chat in enumerate(st.session_state.chat_history, 1):
-        output.write(f"Q{i}: {chat['user']}\n")
-        output.write(f"A{i}: {chat['bot']}\n")
-        output.write(f"Pages referenced: {', '.join(map(str, chat['pages']))}\n")
-        output.write("-" * 40 + "\n")
-
-    st.download_button(
-        label="📥 Download Chat History",
-        data=output.getvalue(),
-        file_name="chat_history.txt",
-        mime="text/plain"
-    )
-
-
+# ---------------------- Main App ---------------------------- #
 def main():
-    st.set_page_config(page_title="Chat with PDFs", page_icon="📚", layout="wide")
+    st.set_page_config(page_title="Chat with Files", page_icon="📚", layout="wide")
     st.write(css, unsafe_allow_html=True)
 
     if "conversation" not in st.session_state:
@@ -131,23 +148,26 @@ def main():
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    st.markdown("<h1 style='text-align: center;'>📚 Chat with your PDFs</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>📚 Chat with your Files (PDF, DOCX, PPTX)</h1>", unsafe_allow_html=True)
 
     col1, col2 = st.columns([1, 1.2], gap="large")
 
     with col1:
         with st.container(border=True, height=700):
             st.subheader("📂 Upload & Interact")
-            pdf_docs = st.file_uploader("Upload your PDFs", accept_multiple_files=True)
-            if st.button("Process") and pdf_docs:
-                with st.spinner("Processing PDFs..."):
-                    docs = get_pdf_text_and_chunks(pdf_docs)
+            uploaded_files = st.file_uploader(
+                "Upload PDF, DOCX, or PPTX files", accept_multiple_files=True,
+                type=["pdf", "docx", "pptx"]
+            )
+
+            if st.button("Process") and uploaded_files:
+                with st.spinner("Processing files..."):
+                    docs = extract_text_from_files(uploaded_files)
                     chunks = split_documents(docs)
                     vectorstore = get_vectorstore(chunks)
                     st.session_state.vectorstore = vectorstore
                     st.session_state.conversation = get_conversation_chain(vectorstore)
-                    st.success("Ready to chat!")
-                    st.session_state.chat_history = []
+                    st.success("✅ Ready to chat!")
 
             question = st.text_input("Ask a question:")
             if question and st.session_state.conversation:
@@ -158,17 +178,21 @@ def main():
                     summary = summarize_documents(st.session_state.vectorstore)
                 st.markdown(f"<div class='justified'><strong>Summary:</strong><br>{summary}</div>", unsafe_allow_html=True)
 
-            st.markdown("---")
-            download_chat_history()
+            if st.session_state.chat_history:
+                download_chat_history()
 
     with col2:
         with st.container(border=True, height=700):
-            st.subheader("📄 PDF Preview")
-            if 'vectorstore' in st.session_state and pdf_docs:
-                for pdf in pdf_docs:
-                    with st.expander(pdf.name, expanded=True):
-                        display_pdf(pdf)
-
+            st.subheader("📄 File Preview")
+            if uploaded_files:
+                for file in uploaded_files:
+                    with st.expander(file.name, expanded=False):
+                        if file.name.endswith(".pdf"):
+                            display_pdf(file)
+                        elif file.name.endswith(".docx"):
+                            display_docx(file)
+                        elif file.name.endswith(".pptx"):
+                            display_pptx(file)
 
 if __name__ == '__main__':
     main()

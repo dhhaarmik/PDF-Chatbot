@@ -28,9 +28,6 @@ An AI-powered chatbot that understands your PDF! Upload any PDF file and ask que
 - Chat history
 - Downloadable Q&A summary
 
-## 📸 Screenshots
-![App Screenshot](screenshots/app.png)
-
 ## 🤝 Contributing
 Feel free to fork and make pull requests!
 

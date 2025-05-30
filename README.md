@@ -31,6 +31,5 @@ An AI-powered chatbot that understands your PDF! Upload any PDF file and ask que
 ## 🤝 Contributing
 Feel free to fork and make pull requests!
 
-## 📃 License
-MIT License
+🚀 Try it now:https://pdf-chatbot-lq2gcqyqix6y4ffurnqq6w.streamlit.app/
 

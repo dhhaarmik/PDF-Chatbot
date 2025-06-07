@@ -8,8 +8,7 @@ An AI-powered chatbot that understands your PDF! Upload any PDF file and ask que
 - Uses LangChain + FAISS + OpenAI Embeddings
 - Clean, simple interface with Streamlit
 
-## 🖼️ Demo
-[Insert a GIF or screenshot here]
+
 
 ## 🛠️ Tech Stack
 - Python
